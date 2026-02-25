@@ -1,0 +1,49 @@
+@import "tailwindcss";
+.input {
+  border: 1px solid #ddd;
+  padding: 8px;
+  border-radius: 8px;
+  width: 100%;
+}
+
+.btn-green {
+  background: #16a34a;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+
+.btn-blue {
+  background: #2563eb;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+
+.btn-red {
+  background: #dc2626;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+
+.btn-purple {
+  background: #7c3aed;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade {
+  animation: fadeIn 0.4s ease-out;
+}
