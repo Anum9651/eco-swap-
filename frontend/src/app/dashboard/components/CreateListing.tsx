@@ -4,8 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
 
 interface CreateListingProps {
-  user: any;
-  onListingCreated: () => void;
+  userId: string;
+  onCreated: () => void;
 }
 
 interface Charity {
@@ -24,33 +24,34 @@ const CATEGORIES = [
 ];
 
 const CONDITIONS = [
-  { value: "new",      label: "New",      description: "Unused, in original packaging" },
-  { value: "like_new", label: "Like New", description: "Used once or twice, no signs of wear" },
-  { value: "good",     label: "Good",     description: "Minor wear, fully functional" },
-  { value: "fair",     label: "Fair",     description: "Visible wear, still works well" },
-  { value: "poor",     label: "Poor",     description: "Heavy wear, may need repairs" },
+  { value: "new",      label: "New",      description: "Unused, in original packaging"        },
+  { value: "like_new", label: "Like New", description: "Used once or twice, no signs of wear"  },
+  { value: "good",     label: "Good",     description: "Minor wear, fully functional"           },
+  { value: "fair",     label: "Fair",     description: "Visible wear, still works well"         },
+  { value: "poor",     label: "Poor",     description: "Heavy wear, may need repairs"           },
 ];
 
 const LISTING_TYPES = [
   { value: "swap",   label: "Swap",   icon: "🔄", description: "Trade for another item" },
-  { value: "donate", label: "Donate", icon: "🎁", description: "Give it away for free" },
-  { value: "sale",   label: "Sale",   icon: "💰", description: "Sell for a price" },
+  { value: "donate", label: "Donate", icon: "🎁", description: "Give it away for free"  },
+  { value: "sale",   label: "Sale",   icon: "💰", description: "Sell for a price"       },
 ];
 
-export default function CreateListing({ user, onListingCreated }: CreateListingProps) {
-  const [imageFile, setImageFile]     = useState<File | null>(null);
+export default function CreateListing({ userId, onCreated }: CreateListingProps) {
+  const [imageFile, setImageFile]       = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [title, setTitle]             = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory]       = useState("");
-  const [condition, setCondition]     = useState("");
-  const [listingType, setListingType] = useState<"swap" | "donate" | "sale">("swap");
-  const [price, setPrice]             = useState("");
-  const [donateToId, setDonateToId]   = useState("");
-  const [charities, setCharities]     = useState<Charity[]>([]);
-  const [loading, setLoading]         = useState(false);
-  const [errors, setErrors]           = useState<Record<string, string>>({});
-  const [success, setSuccess]         = useState(false);
+  const [title, setTitle]               = useState("");
+  const [description, setDescription]   = useState("");
+  const [category, setCategory]         = useState("");
+  const [condition, setCondition]       = useState("");
+  const [listingType, setListingType]   = useState<"swap" | "donate" | "sale">("swap");
+  const [price, setPrice]               = useState("");
+  const [donateToId, setDonateToId]     = useState("");
+  const [charities, setCharities]       = useState<Charity[]>([]);
+  const [loading, setLoading]           = useState(false);
+  const [suggestingPrice, setSuggestingPrice] = useState(false);
+  const [errors, setErrors]             = useState<Record<string, string>>({});
+  const [success, setSuccess]           = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch charities when donate tab selected
@@ -87,6 +88,22 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const handleSuggestPrice = async () => {
+    if (!title.trim()) { alert("Add a title first."); return; }
+    setSuggestingPrice(true);
+    try {
+      const res  = await fetch("/api/agent/suggest-price", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ title, category, condition, description }),
+      });
+      const data = await res.json();
+      if (data.suggested) setPrice(data.suggested.toString());
+    } finally {
+      setSuggestingPrice(false);
+    }
+  };
+
   const handleCreateListing = async () => {
     if (!validate()) return;
     setLoading(true);
@@ -97,7 +114,7 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
 
       if (imageFile) {
         const fileExt = imageFile.name.split(".").pop();
-        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+        const fileName = `${userId}-${Date.now()}.${fileExt}`;
         const { error: uploadError } = await supabase.storage
           .from("listing-images").upload(fileName, imageFile);
         if (!uploadError) {
@@ -109,7 +126,7 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
       const { data: inserted, error: insertError } = await supabase
         .from("listings")
         .insert({
-          user_id:      user.id,
+          user_id:      userId,
           title:        title.trim(),
           description:  description.trim(),
           category,
@@ -118,7 +135,6 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
           price:        listingType === "sale" ? Number(price) : null,
           donate_to:    listingType === "donate" && donateToId ? donateToId : null,
           eco_score:    0,
-          carbon_estimated: 0,
           fraud_flag:   false,
           status:       "active",
           image_url:    imageUrl,
@@ -131,21 +147,21 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
         return;
       }
 
-      const res = await fetch("/api/agent/process-listing", {
-        method: "POST",
+      // Run AI agent in background
+      fetch("/api/agent/process-listing", {
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listingId: inserted.id }),
-      });
-      if (!res.ok) console.error("Agent route failed");
+        body:    JSON.stringify({ listingId: inserted.id }),
+      }).catch(console.error);
 
-      // Reset
+      // Reset form
       setTitle(""); setDescription(""); setCategory(""); setCondition("");
       setPrice(""); setDonateToId(""); setImageFile(null); setImagePreview(null);
       setErrors({});
       if (fileInputRef.current) fileInputRef.current.value = "";
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
-      onListingCreated();
+      onCreated();
     } catch (err) {
       console.error("Create listing error:", err);
     } finally {
@@ -168,27 +184,23 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
           <p className="text-sm text-gray-500 mt-0.5">Swap, donate, or sell an item</p>
         </div>
         <span className="text-xs font-medium bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-100">
-          🌿 Eco Scored
+          🌿 AI Eco Scored
         </span>
       </div>
 
       <div className="px-8 py-6 space-y-6">
 
-        {/* Listing Type Selector */}
+        {/* Listing Type */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-3">Listing Type</label>
           <div className="grid grid-cols-3 gap-3">
             {LISTING_TYPES.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => setListingType(t.value as any)}
+              <button key={t.value} type="button" onClick={() => setListingType(t.value as any)}
                 className={`flex flex-col items-center gap-1.5 py-4 px-3 rounded-xl border-2 transition-all duration-150 ${
                   listingType === t.value
                     ? "border-green-500 bg-green-50 text-green-700"
                     : "border-gray-200 hover:border-gray-300 text-gray-500 hover:bg-gray-50"
-                }`}
-              >
+                }`}>
                 <span className="text-2xl">{t.icon}</span>
                 <span className="text-sm font-semibold">{t.label}</span>
                 <span className="text-xs text-center leading-tight opacity-70">{t.description}</span>
@@ -268,23 +280,35 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
           </div>
         </div>
 
-        {/* Sale — Price field */}
+        {/* Sale — Price field with AI suggester */}
         {listingType === "sale" && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Price <span className="text-red-400">*</span>
+              Price (£) <span className="text-red-400">*</span>
             </label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">$</span>
-              <input
-                className={`${inputClass("price")} pl-8`}
-                placeholder="0.00"
-                type="number"
-                min="0"
-                step="0.01"
-                value={price}
-                onChange={(e) => { setPrice(e.target.value); if (errors.price) setErrors(p => ({ ...p, price: "" })); }}
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">£</span>
+                <input
+                  className={`${inputClass("price")} pl-8`}
+                  placeholder="0.00"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={price}
+                  onChange={(e) => { setPrice(e.target.value); if (errors.price) setErrors(p => ({ ...p, price: "" })); }}
+                />
+              </div>
+              <button type="button" onClick={handleSuggestPrice} disabled={suggestingPrice}
+                className="flex-shrink-0 flex items-center gap-1.5 text-xs font-semibold text-purple-600 bg-purple-50 hover:bg-purple-100 px-3 py-2 rounded-xl border border-purple-100 transition disabled:opacity-50 whitespace-nowrap">
+                {suggestingPrice ? (
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                ) : "🤖"}
+                {suggestingPrice ? "Thinking…" : "AI Price"}
+              </button>
             </div>
             {errors.price && <p className="mt-1.5 text-xs text-red-500">{errors.price}</p>}
           </div>
@@ -294,7 +318,7 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
         {listingType === "donate" && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Donate to <span className="text-gray-400 font-normal">(optional — leave blank to donate to anyone)</span>
+              Donate to <span className="text-gray-400 font-normal">(optional)</span>
             </label>
             {charities.length === 0 ? (
               <div className="flex items-center gap-2 text-sm text-gray-400 py-3">
@@ -306,34 +330,21 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* "Anyone" option */}
-                <button
-                  type="button"
-                  onClick={() => setDonateToId("")}
+                <button type="button" onClick={() => setDonateToId("")}
                   className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                    donateToId === ""
-                      ? "border-green-500 bg-green-50"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
+                    donateToId === "" ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-gray-300"
+                  }`}>
                   <div className="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center text-lg flex-shrink-0">🌍</div>
                   <div>
                     <p className="text-sm font-semibold text-gray-800">Anyone in need</p>
                     <p className="text-xs text-gray-400">Open donation to the community</p>
                   </div>
                 </button>
-
                 {charities.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setDonateToId(c.id)}
+                  <button key={c.id} type="button" onClick={() => setDonateToId(c.id)}
                     className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                      donateToId === c.id
-                        ? "border-green-500 bg-green-50"
-                        : "border-gray-200 hover:border-gray-300"
-                    }`}
-                  >
+                      donateToId === c.id ? "border-green-500 bg-green-50" : "border-gray-200 hover:border-gray-300"
+                    }`}>
                     <div className="w-9 h-9 rounded-lg bg-green-100 flex items-center justify-center text-lg flex-shrink-0 overflow-hidden">
                       {c.logo_url
                         ? <img src={c.logo_url} alt={c.name} className="w-full h-full object-cover" />
@@ -344,11 +355,9 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
                       <div className="flex items-center gap-1.5">
                         <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
                         {c.verified && (
-                          <span className="text-blue-500 flex-shrink-0" title="Verified">
-                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                          </span>
+                          <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
                         )}
                       </div>
                       <p className="text-xs text-gray-400 truncate">{c.description}</p>
@@ -363,17 +372,17 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
         {/* Description */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Description <span className="text-gray-400 font-normal">(optional)</span>
+            Description <span className="text-gray-400 font-normal">(optional — AI will improve it)</span>
           </label>
           <textarea className={`${inputClass("description")} resize-none`} rows={3}
-            placeholder="Describe your item — dimensions, brand, reason for listing, etc."
+            placeholder="Describe your item — the AI will enhance this automatically after posting."
             value={description}
             onChange={(e) => setDescription(e.target.value)} />
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-1">
-          <p className="text-xs text-gray-400">Listing will be eco-scored automatically after creation.</p>
+          <p className="text-xs text-gray-400">🤖 AI will eco-score and improve description after posting.</p>
           <div className="flex items-center gap-3">
             {success && (
               <span className="text-sm text-green-600 font-medium flex items-center gap-1.5">
@@ -386,8 +395,8 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
             <button onClick={handleCreateListing} disabled={loading}
               className={`flex items-center gap-2 text-white text-sm font-semibold px-6 py-2.5 rounded-xl transition-all hover:shadow-md active:scale-95 disabled:cursor-not-allowed ${
                 listingType === "donate" ? "bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400" :
-                listingType === "sale"   ? "bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400" :
-                                          "bg-green-600 hover:bg-green-700 disabled:bg-green-400"
+                listingType === "sale"   ? "bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400"       :
+                                           "bg-green-600 hover:bg-green-700 disabled:bg-green-400"
               }`}>
               {loading ? (
                 <>
@@ -400,7 +409,7 @@ export default function CreateListing({ user, onListingCreated }: CreateListingP
               ) : (
                 <>
                   {listingType === "donate" ? "🎁" : listingType === "sale" ? "💰" : "🔄"}
-                  {listingType === "donate" ? "Post Donation" : listingType === "sale" ? "List for Sale" : "Create Swap"}
+                  {listingType === "donate" ? " Post Donation" : listingType === "sale" ? " List for Sale" : " Create Swap"}
                 </>
               )}
             </button>

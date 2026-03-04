@@ -11,43 +11,69 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router   = useRouter();
 
   const [user, setUser]                             = useState<any>(null);
+  const [userId, setUserId]                         = useState<string | null>(null);
   const [showAvatarDropdown, setShowAvatarDropdown] = useState(false);
   const [showNotifications, setShowNotifications]   = useState(false);
   const [notifications, setNotifications]           = useState<any[]>([]);
+  const [avatarUrl, setAvatarUrl]                   = useState<string | null>(null);
+  const [initials, setInitials]                     = useState("U");
 
   const avatarRef = useRef<HTMLDivElement>(null);
   const notifRef  = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user ?? null));
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) {
+        setUser(data.user);
+        setUserId(data.user.id);
+      }
+    });
   }, []);
 
+  useEffect(() => {
+    if (!userId) return;
+    supabase.from("profiles")
+      .select("avatar_url, full_name")
+      .eq("id", userId)
+      .single()
+      .then(({ data }) => {
+        if (data?.avatar_url) setAvatarUrl(data.avatar_url);
+        if (data?.full_name) {
+          setInitials(
+            data.full_name.split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)
+          );
+        } else {
+          setInitials("U");
+        }
+      });
+  }, [userId]);
+
   const fetchNotifications = useCallback(async () => {
-    if (!user) return;
+    if (!userId) return;
     const { data } = await supabase
       .from("notifications")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .order("created_at", { ascending: false });
     if (data) setNotifications(data);
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     fetchNotifications();
-  }, [user, fetchNotifications]);
+  }, [userId, fetchNotifications]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     const channel = supabase
-      .channel(`notifications:${user.id}`)
+      .channel(`notifications:${userId}`)
       .on("postgres_changes",
-        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
         fetchNotifications
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [user, fetchNotifications]);
+  }, [userId, fetchNotifications]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -75,22 +101,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     const q = (e.currentTarget.elements.namedItem("q") as HTMLInputElement).value.trim();
     if (q) router.push(`/dashboard/search?q=${encodeURIComponent(q)}`);
   };
-  const communitiesIcon = (
-  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
-);
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   const navItems = [
-  { label: "Overview",     path: "/dashboard",              icon: overviewIcon     },
-  { label: "Listings",     path: "/dashboard/listings",     icon: listingsIcon     },
-  { label: "Map",          path: "/dashboard/map",          icon: mapIcon          },
-  { label: "Communities",  path: "/dashboard/communities",  icon: communitiesIcon  },
-  { label: "Requests",     path: "/dashboard/requests",     icon: requestsIcon     },
-  { label: "Profile",      path: "/dashboard/profile",      icon: profileIcon      },
-];
+    { label: "Overview",    path: "/dashboard",             icon: overviewIcon    },
+    { label: "Listings",    path: "/dashboard/listings",    icon: listingsIcon    },
+    { label: "Map",         path: "/dashboard/map",         icon: mapIcon         },
+    { label: "Communities", path: "/dashboard/communities", icon: communitiesIcon },
+    { label: "Requests",    path: "/dashboard/requests",    icon: requestsIcon    },
+    { label: "Profile",     path: "/dashboard/profile",     icon: profileIcon     },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -137,6 +158,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Right side */}
           <div className="flex items-center gap-2">
 
+            {/* Mobile search */}
             <button onClick={() => router.push("/dashboard/search")}
               className="md:hidden w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white hover:bg-gray-50 transition">
               <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -170,8 +192,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div className="relative" ref={avatarRef}>
               <button
                 onClick={() => { setShowAvatarDropdown((p) => !p); setShowNotifications(false); }}
-                className="w-9 h-9 rounded-xl bg-green-600 hover:bg-green-700 text-white flex items-center justify-center text-sm font-bold shadow-sm transition">
-                {user?.email?.charAt(0).toUpperCase() ?? "U"}
+                className="flex items-center gap-2 hover:opacity-80 transition">
+                <div className="w-8 h-8 rounded-xl overflow-hidden bg-green-600 flex items-center justify-center flex-shrink-0">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-white text-xs font-bold">{initials}</span>
+                  )}
+                </div>
               </button>
 
               {showAvatarDropdown && (
@@ -195,6 +223,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                       </svg>
                       Settings
+                    </Link>
+                    <Link href="/admin"
+                      className="flex items-center gap-2.5 px-3 py-2 text-sm text-yellow-500 hover:bg-yellow-50 rounded-xl transition">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                      Admin Panel
                     </Link>
                   </div>
                   <div className="p-1.5 border-t border-gray-100">
@@ -249,6 +285,11 @@ const listingsIcon = (
 const mapIcon = (
   <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
     <path d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6-10l6-3m0 13l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 9m0 4V6" />
+  </svg>
+);
+const communitiesIcon = (
+  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
 );
 const requestsIcon = (

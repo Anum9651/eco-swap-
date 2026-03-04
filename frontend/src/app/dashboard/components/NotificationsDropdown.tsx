@@ -1,182 +1,128 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useState } from "react";
+import { supabase } from "../../../lib/supabase";
 
 interface Notification {
   id: string;
+  type: string;
   message: string;
-  type?: string;
   is_read: boolean;
-  created_at?: string;
+  created_at: string;
+  related_id?: string;
+}
+
+const TYPE_ICONS: Record<string, string> = {
+  swap_request:    "🔄",
+  request_accepted:"✅",
+  request_rejected:"❌",
+  counter_offer:   "🔁",
+  swap_completed:  "🎉",
+  eco_report:      "🌿",
+  default:         "🔔",
+};
+
+function TimeAgo({ date }: { date: string }) {
+  const diff  = Date.now() - new Date(date).getTime();
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days  = Math.floor(diff / 86400000);
+  if (mins < 1)   return <span>Just now</span>;
+  if (mins < 60)  return <span>{mins}m ago</span>;
+  if (hours < 24) return <span>{hours}h ago</span>;
+  return <span>{days}d ago</span>;
 }
 
 interface NotificationsDropdownProps {
   notifications: Notification[];
 }
 
-const TYPE_CONFIG: Record<string, { icon: string; color: string }> = {
-  swap_request:  { icon: "🔄", color: "bg-blue-50" },
-  swap_accepted: { icon: "✅", color: "bg-green-50" },
-  swap_rejected: { icon: "❌", color: "bg-red-50" },
-  completed:     { icon: "🎉", color: "bg-purple-50" },
-  default:       { icon: "🔔", color: "bg-gray-50" },
-};
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-export default function NotificationsDropdown({ notifications }: NotificationsDropdownProps) {
-  const [local, setLocal] = useState<Notification[]>([]);
-  const [markingAll, setMarkingAll] = useState(false);
-
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const prevCountRef = useRef(0);
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
+export default function NotificationsDropdown({ notifications: initialNotifications }: NotificationsDropdownProps) {
+  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+  const [markingAll, setMarkingAll]       = useState(false);
 
   useEffect(() => {
-    setLocal(notifications.filter((n) => !n.is_read));
-  }, [notifications]);
+    setNotifications(initialNotifications);
+  }, [initialNotifications]);
 
-  useEffect(() => {
-    audioRef.current = new Audio("/notification.mp3");
-
-    const unlock = () => {
-      audioRef.current?.play().catch(() => {});
-      audioRef.current?.pause();
-      audioRef.current!.currentTime = 0;
-      setAudioUnlocked(true);
-      window.removeEventListener("click", unlock);
-    };
-
-    window.addEventListener("click", unlock);
-    return () => window.removeEventListener("click", unlock);
-  }, []);
-
-  useEffect(() => {
-    if (!audioUnlocked) return;
-
-    if (local.length > prevCountRef.current) {
-      audioRef.current?.play().catch(() => {});
-    }
-
-    prevCountRef.current = local.length;
-  }, [local, audioUnlocked]);
-
-  const markAsRead = async (n: Notification) => {
-    setLocal((prev) => prev.filter((x) => x.id !== n.id));
-
-    await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .eq("id", n.id);
+  const handleMarkRead = async (id: string) => {
+    await supabase.from("notifications").update({ is_read: true }).eq("id", id);
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, is_read: true } : n));
   };
 
-  const markAllAsRead = async () => {
-    if (!local.length || markingAll) return;
-
+  const handleMarkAllRead = async () => {
     setMarkingAll(true);
-
-    const ids = local.map((n) => n.id);
-
-    setLocal([]);
-
-    await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .in("id", ids);
-
+    const unreadIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
+    if (unreadIds.length > 0) {
+      await supabase.from("notifications").update({ is_read: true }).in("id", unreadIds);
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    }
     setMarkingAll(false);
   };
 
-  const typeConfig = (type?: string) =>
-    TYPE_CONFIG[type ?? "default"] ?? TYPE_CONFIG.default;
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   return (
-    <div
-      className="absolute right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-gray-100 z-50 overflow-hidden"
-      style={{ width: "22rem" }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-gray-900">Notifications</span>
+    <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden z-50">
 
-          {local.length > 0 && (
-            <span className="text-xs font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full min-w-[20px] text-center">
-              {local.length}
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-bold text-gray-900">Notifications</p>
+          {unreadCount > 0 && (
+            <span className="text-xs font-bold bg-green-600 text-white px-2 py-0.5 rounded-full">
+              {unreadCount}
             </span>
           )}
         </div>
-
-        {local.length > 0 && (
-          <button
-            onClick={markAllAsRead}
-            disabled={markingAll}
-            className="text-xs text-green-600 hover:text-green-700 font-medium disabled:opacity-50 transition"
-          >
-            Mark all read
+        {unreadCount > 0 && (
+          <button onClick={handleMarkAllRead} disabled={markingAll}
+            className="text-xs font-semibold text-green-600 hover:text-green-700 transition disabled:opacity-50">
+            {markingAll ? "Marking…" : "Mark all read"}
           </button>
         )}
       </div>
 
-      {/* Body */}
-      <div className="max-h-80 overflow-y-auto">
-        {local.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-center px-4">
-            <div className="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center mb-3">
-              ✔
-            </div>
-
-            <p className="text-sm font-medium text-gray-600">All caught up!</p>
-            <p className="text-xs text-gray-400 mt-0.5">No new notifications</p>
+      {/* List */}
+      <div className="max-h-80 overflow-y-auto divide-y divide-gray-50">
+        {notifications.length === 0 ? (
+          <div className="px-4 py-8 text-center">
+            <p className="text-2xl mb-2">🔔</p>
+            <p className="text-sm text-gray-400">No notifications yet</p>
           </div>
         ) : (
-          <ul>
-            {local.map((n) => {
-              const { icon, color } = typeConfig(n.type);
-
-              return (
-                <li key={n.id}>
-                  <button
-                    onClick={() => markAsRead(n)}
-                    className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 transition text-left border-b border-gray-50 last:border-none"
-                  >
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm ${color}`}>
-                      {icon}
-                    </div>
-
-                    <div className="flex-1">
-                      <p className="text-sm text-gray-700">{n.message}</p>
-
-                      {n.created_at && (
-                        <p className="text-xs text-gray-400 mt-1">
-                          {timeAgo(n.created_at)}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="w-2 h-2 bg-blue-500 rounded-full mt-2" />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          notifications.slice(0, 15).map((n) => (
+            <div
+              key={n.id}
+              onClick={() => !n.is_read && handleMarkRead(n.id)}
+              className={`flex items-start gap-3 px-4 py-3 transition cursor-pointer ${
+                n.is_read ? "bg-white hover:bg-gray-50" : "bg-green-50 hover:bg-green-100"
+              }`}>
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 ${
+                n.is_read ? "bg-gray-100" : "bg-green-100"
+              }`}>
+                {TYPE_ICONS[n.type] ?? TYPE_ICONS.default}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs leading-snug ${n.is_read ? "text-gray-600" : "text-gray-900 font-medium"}`}>
+                  {n.message}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5">
+                  <TimeAgo date={n.created_at} />
+                </p>
+              </div>
+              {!n.is_read && (
+                <div className="w-2 h-2 bg-green-500 rounded-full flex-shrink-0 mt-1" />
+              )}
+            </div>
+          ))
         )}
       </div>
 
-      {local.length > 0 && (
-        <div className="px-4 py-2 border-t border-gray-100 bg-gray-50">
-          <p className="text-xs text-gray-400 text-center">
-            Click a notification to dismiss it
-          </p>
+      {/* Footer */}
+      {notifications.length > 0 && (
+        <div className="px-4 py-2.5 border-t border-gray-100 text-center">
+          <p className="text-xs text-gray-400">{notifications.length} total notifications</p>
         </div>
       )}
     </div>
