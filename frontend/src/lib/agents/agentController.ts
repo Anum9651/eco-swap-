@@ -20,7 +20,7 @@ export async function processListingAgent(listingId: string) {
     throw new Error("Listing not found");
   }
 
-  // 1️⃣ Carbon Agent
+  // 1. Carbon Agent
   const carbonResult = carbonTool(listing.category);
 
   await logAgent(
@@ -31,10 +31,8 @@ export async function processListingAgent(listingId: string) {
     carbonResult.confidence
   );
 
-  // 2️⃣ Eco Score Agent
-  const ecoResult = ecoScoreTool(
-    carbonResult.result.avoided_emission
-  );
+  // 2. Eco Score Agent
+  const ecoResult = ecoScoreTool(carbonResult.result.avoided_emission);
 
   await logAgent(
     listingId,
@@ -44,8 +42,8 @@ export async function processListingAgent(listingId: string) {
     ecoResult.confidence
   );
 
-  // 3️⃣ Fraud Agent
-  const fraudResult = fraudTool(listing.description);
+  // 3. Fraud Agent
+  const fraudResult = await fraudTool(listing.description);
 
   await logAgent(
     listingId,
@@ -59,9 +57,9 @@ export async function processListingAgent(listingId: string) {
   await supabase
     .from("listings")
     .update({
-      eco_score: ecoResult.result.eco_score,
-      carbon_estimated: carbonResult.result.avoided_emission,
-      fraud_flag: fraudResult.result.fraud_flag,
+      eco_score:         ecoResult.result.eco_score,
+      carbon_estimated:  carbonResult.result.avoided_emission,
+      fraud_flag:        fraudResult.result.fraud_flag,
     })
     .eq("id", listingId);
 

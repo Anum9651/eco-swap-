@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export async function POST(req: Request) {
   try {
@@ -10,6 +10,11 @@ export async function POST(req: Request) {
     if (eco_points === undefined) {
       return NextResponse.json({ error: "Missing user stats" }, { status: 400 });
     }
+
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      generationConfig: { temperature: 0.4 },
+    });
 
     const prompt = `You are an eco-impact analyst for Eco-Swap, a sustainable swapping platform.
 
@@ -26,26 +31,18 @@ Generate a personalised eco-impact report. Respond ONLY with a valid JSON object
   "summary": "A warm 1-2 sentence personalised summary of their environmental contribution",
   "co2_saved_kg": <number — estimated kg of CO2 saved based on items swapped/donated, avg 5kg per item>,
   "items_diverted": <number — total items kept from landfill>,
-  "equivalent": "<a relatable real-world equivalent, e.g. '3 tree seedlings grown for 10 years'>",
+  "equivalent": "<a relatable real-world equivalent, e.g. 3 tree seedlings grown for 10 years>",
   "tip": "A specific, actionable eco tip tailored to their activity level",
   "badge": "<a single relevant emoji badge reflecting their level>"
 }`;
 
-    const message = await anthropic.messages.create({
-      model: "claude-opus-4-5",
-      max_tokens: 512,
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    const raw = message.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b as any).text)
-      .join("");
-
-    const clean = raw.replace(/```json|```/g, "").trim();
+    const result = await model.generateContent(prompt);
+    const raw    = result.response.text();
+    const clean  = raw.replace(/```json|```/g, "").trim();
     const report = JSON.parse(clean);
 
     return NextResponse.json({ report });
+
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     console.error("[eco-report] Error:", msg);

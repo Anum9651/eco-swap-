@@ -52,7 +52,22 @@ export default function CreateListing({ userId, onCreated }: CreateListingProps)
   const [suggestingPrice, setSuggestingPrice] = useState(false);
   const [errors, setErrors]             = useState<Record<string, string>>({});
   const [success, setSuccess]           = useState(false);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch user's location from profile
+  useEffect(() => {
+    supabase
+      .from("profiles")
+      .select("latitude, longitude")
+      .eq("id", userId)
+      .single()
+      .then(({ data }) => {
+        if (data?.latitude && data?.longitude) {
+          setUserLocation({ latitude: data.latitude, longitude: data.longitude });
+        }
+      });
+  }, [userId]);
 
   // Fetch charities when donate tab selected
   useEffect(() => {
@@ -138,6 +153,8 @@ export default function CreateListing({ userId, onCreated }: CreateListingProps)
           fraud_flag:   false,
           status:       "active",
           image_url:    imageUrl,
+          latitude:     userLocation?.latitude ?? null,
+          longitude:    userLocation?.longitude ?? null,
         })
         .select()
         .single();
@@ -183,9 +200,20 @@ export default function CreateListing({ userId, onCreated }: CreateListingProps)
           <h2 className="text-lg font-semibold text-gray-900">Create a Listing</h2>
           <p className="text-sm text-gray-500 mt-0.5">Swap, donate, or sell an item</p>
         </div>
-        <span className="text-xs font-medium bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-100">
-          🌿 AI Eco Scored
-        </span>
+        <div className="flex items-center gap-2">
+          {userLocation ? (
+            <span className="text-xs font-medium bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full border border-blue-100">
+              📍 Location set
+            </span>
+          ) : (
+            <span className="text-xs font-medium bg-orange-50 text-orange-600 px-3 py-1.5 rounded-full border border-orange-100">
+              ⚠️ No location in profile
+            </span>
+          )}
+          <span className="text-xs font-medium bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-100">
+            🌿 AI Eco Scored
+          </span>
+        </div>
       </div>
 
       <div className="px-8 py-6 space-y-6">
