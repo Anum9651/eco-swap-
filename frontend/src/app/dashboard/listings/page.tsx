@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "../../../lib/supabase";
 import CreateListing from "../components/CreateListing";
-import Link from "next/link";
 
 interface Listing {
   id: string;
@@ -18,6 +17,7 @@ interface Listing {
   eco_score?: number;
   fraud_flag?: boolean;
   created_at: string;
+  user_id?: string;
 }
 
 interface SwapMatch {
@@ -70,11 +70,11 @@ export default function ListingsPage() {
   const [editingListing, setEditingListing] = useState<Listing | null>(null);
 
   // Edit form state
-  const [editTitle, setEditTitle]       = useState("");
-  const [editDesc, setEditDesc]         = useState("");
-  const [editPrice, setEditPrice]       = useState("");
-  const [editStatus, setEditStatus]     = useState("");
-  const [saving, setSaving]             = useState(false);
+  const [editTitle, setEditTitle]   = useState("");
+  const [editDesc, setEditDesc]     = useState("");
+  const [editPrice, setEditPrice]   = useState("");
+  const [editStatus, setEditStatus] = useState("");
+  const [saving, setSaving]         = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -82,14 +82,12 @@ export default function ListingsPage() {
     });
   }, []);
 
-  
-
   const fetchMyListings = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     const { data } = await supabase
       .from("listings")
-      .select("id, title, description, category, condition, listing_type, image_url, price, status, eco_score, fraud_flag, created_at")
+      .select("id, title, description, category, condition, listing_type, image_url, price, status, eco_score, fraud_flag, created_at, user_id")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
     setListings(data ?? []);
@@ -100,7 +98,7 @@ export default function ListingsPage() {
     if (!user) return;
     const { data } = await supabase
       .from("listings")
-      .select("id, title, description, category, condition, listing_type, image_url, price, status, eco_score, fraud_flag, created_at")
+      .select("id, title, description, category, condition, listing_type, image_url, price, status, eco_score, fraud_flag, created_at, user_id")
       .neq("user_id", user.id)
       .eq("status", "active")
       .order("created_at", { ascending: false })
@@ -131,6 +129,34 @@ export default function ListingsPage() {
     if (activeTab === "all")     fetchAllListings();
     if (activeTab === "matches") fetchMatches();
   }, [activeTab, fetchAllListings, fetchMatches]);
+
+  // FIX 1: Realtime subscription moved OUT of ListingCard to page level
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel("listings:realtime")
+      .on("postgres_changes", {
+        event:  "INSERT",
+        schema: "public",
+        table:  "listings",
+      }, (payload) => {
+        if (payload.new.user_id !== user.id) {
+          setAllListings((prev) => [payload.new as Listing, ...prev]);
+        } else {
+          fetchMyListings();
+        }
+      })
+      .on("postgres_changes", {
+        event:  "UPDATE",
+        schema: "public",
+        table:  "listings",
+      }, () => {
+        if (activeTab === "all") fetchAllListings();
+        else fetchMyListings();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user, activeTab, fetchMyListings, fetchAllListings]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this listing? This cannot be undone.")) return;
@@ -177,12 +203,12 @@ export default function ListingsPage() {
     await supabase.from("swap_requests").insert({
       listing_id:              listing.id,
       requester_id:            user.id,
-      owner_id:                (listing as any).user_id,
+      owner_id:                listing.user_id,
       status:                  "pending",
       completion_confirmed_by: [],
     });
     await supabase.from("notifications").insert({
-      user_id:    (listing as any).user_id,
+      user_id:    listing.user_id,
       type:       "swap_request",
       message:    `You received a new swap request for "${listing.title}".`,
       related_id: listing.id,
@@ -192,38 +218,11 @@ export default function ListingsPage() {
 
   const inputClass = "w-full px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300 text-sm text-gray-800 placeholder-gray-400 bg-white outline-none focus:ring-2 focus:ring-green-500 transition-all";
 
+  // FIX 2: ListingCard is now a clean component with NO hooks inside it
   const ListingCard = ({ listing, isOwn }: { listing: Listing; isOwn: boolean }) => {
     const type     = listing.listing_type ?? "swap";
     const typeConf = TYPE_CONFIG[type] ?? TYPE_CONFIG.swap;
     const condKey  = listing.condition ?? "";
-    // Real-time: new listings from other users appear instantly
-useEffect(() => {
-  if (!user) return;
-  const channel = supabase
-    .channel("listings:realtime")
-    .on("postgres_changes", {
-      event:  "INSERT",
-      schema: "public",
-      table:  "listings",
-    }, (payload) => {
-      if (payload.new.user_id !== user.id) {
-        setAllListings((prev) => [payload.new as Listing, ...prev]);
-      } else {
-        // Own new listing — refresh my listings
-        fetchMyListings();
-      }
-    })
-    .on("postgres_changes", {
-      event:  "UPDATE",
-      schema: "public",
-      table:  "listings",
-    }, () => {
-      if (activeTab === "all") fetchAllListings();
-      else fetchMyListings();
-    })
-    .subscribe();
-  return () => { supabase.removeChannel(channel); };
-}, [user, activeTab, fetchMyListings, fetchAllListings]);
 
     return (
       <div className={`group bg-white rounded-2xl border shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1 overflow-hidden flex flex-col ${
@@ -239,26 +238,22 @@ useEffect(() => {
             <div className="w-full h-full flex items-center justify-center text-gray-300 text-3xl">📦</div>
           )}
 
-          {/* Type badge */}
           <div className={`absolute top-3 left-3 text-xs font-semibold px-2.5 py-1 rounded-full ${typeConf.bg} ${typeConf.color}`}>
             {type === "swap" ? "🔄" : type === "donate" ? "🎁" : "💰"} {typeConf.label}
           </div>
 
-          {/* Eco score */}
           {listing.eco_score != null && listing.eco_score > 0 && (
             <div className="absolute top-3 right-3 flex items-center gap-1 bg-white/90 backdrop-blur-sm text-green-700 text-xs font-semibold px-2.5 py-1 rounded-full shadow-sm">
               🌿 {listing.eco_score}
             </div>
           )}
 
-          {/* Fraud flag */}
           {listing.fraud_flag && (
             <div className="absolute bottom-3 left-3 bg-red-500 text-white text-xs font-semibold px-2.5 py-1 rounded-full">
               🚩 Flagged
             </div>
           )}
 
-          {/* Status badge */}
           {listing.status !== "active" && (
             <div className={`absolute bottom-3 right-3 text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_COLORS[listing.status] ?? STATUS_COLORS.inactive}`}>
               {listing.status}
@@ -427,9 +422,9 @@ useEffect(() => {
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
         {([
-          { key: "mine",    label: `My Listings (${listings.length})`,  icon: "📦" },
-          { key: "all",     label: "Browse All",                        icon: "🔍" },
-          { key: "matches", label: "🤖 AI Matches",                     icon: ""   },
+          { key: "mine",    label: `My Listings (${listings.length})`, icon: "📦" },
+          { key: "all",     label: "Browse All",                       icon: "🔍" },
+          { key: "matches", label: "🤖 AI Matches",                    icon: ""   },
         ] as const).map((t) => (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${

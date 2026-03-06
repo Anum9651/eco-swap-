@@ -20,7 +20,7 @@ interface Member {
   user_id: string;
   role: string;
   joined_at: string;
-  profiles?: { full_name?: string; avatar_url?: string; eco_points?: number; avg_rating?: number };
+  profiles?: { full_name?: string; avatar_url?: string; eco_points?: number; avg_rating?: number } | { full_name?: string; avatar_url?: string; eco_points?: number; avg_rating?: number }[];
 }
 
 interface Listing {
@@ -48,6 +48,12 @@ const TYPE_COLOR: Record<string, string> = {
   donate: "bg-purple-100 text-purple-700",
   sale:   "bg-blue-100 text-blue-700",
 };
+
+// Helper to normalise profiles (Supabase returns array or object)
+function getProfile(m: Member) {
+  if (!m.profiles) return undefined;
+  return Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+}
 
 export default function CommunityPage() {
   const params   = useParams();
@@ -93,7 +99,7 @@ export default function CommunityPage() {
       ]);
 
       setCommunity(comm);
-      setMembers(mems ?? []);
+      setMembers((mems ?? []) as Member[]);
       setListings(lists ?? []);
       setIsMember(!!membership);
       setIsAdmin(membership?.role === "admin");
@@ -150,7 +156,7 @@ export default function CommunityPage() {
 
   // Leaderboard — sort members by eco_points desc
   const leaderboard = [...members].sort(
-    (a, b) => (b.profiles?.eco_points ?? 0) - (a.profiles?.eco_points ?? 0)
+    (a, b) => (getProfile(b)?.eco_points ?? 0) - (getProfile(a)?.eco_points ?? 0)
   );
 
   return (
@@ -280,37 +286,40 @@ export default function CommunityPage() {
             <div className="py-12 text-center text-sm text-gray-400">No members yet</div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {members.map((m) => (
-                <div key={m.user_id} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition">
-                  <div className="w-10 h-10 rounded-xl bg-green-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0 overflow-hidden">
-                    {m.profiles?.avatar_url
-                      ? <img src={m.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
-                      : (m.profiles?.full_name?.[0] ?? "U").toUpperCase()
-                    }
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900">
-                      {m.profiles?.full_name ?? "Eco Swapper"}
-                      {m.user_id === user?.id && (
-                        <span className="ml-2 text-xs text-gray-400">(you)</span>
+              {members.map((m) => {
+                const profile = getProfile(m);
+                return (
+                  <div key={m.user_id} className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition">
+                    <div className="w-10 h-10 rounded-xl bg-green-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0 overflow-hidden">
+                      {profile?.avatar_url
+                        ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                        : (profile?.full_name?.[0] ?? "U").toUpperCase()
+                      }
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">
+                        {profile?.full_name ?? "Eco Swapper"}
+                        {m.user_id === user?.id && (
+                          <span className="ml-2 text-xs text-gray-400">(you)</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        Joined {new Date(m.joined_at).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {m.role === "admin" && (
+                        <span className="text-xs font-semibold bg-yellow-100 text-yellow-700 px-2.5 py-0.5 rounded-full">
+                          👑 Admin
+                        </span>
                       )}
-                    </p>
-                    <p className="text-xs text-gray-400">
-                      Joined {new Date(m.joined_at).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {m.role === "admin" && (
-                      <span className="text-xs font-semibold bg-yellow-100 text-yellow-700 px-2.5 py-0.5 rounded-full">
-                        👑 Admin
+                      <span className="text-xs font-semibold text-green-600 bg-green-50 px-2.5 py-0.5 rounded-full">
+                        🌿 {profile?.eco_points ?? 0} pts
                       </span>
-                    )}
-                    <span className="text-xs font-semibold text-green-600 bg-green-50 px-2.5 py-0.5 rounded-full">
-                      🌿 {m.profiles?.eco_points ?? 0} pts
-                    </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -325,6 +334,7 @@ export default function CommunityPage() {
           </div>
           <div className="divide-y divide-gray-50">
             {leaderboard.map((m, idx) => {
+              const profile = getProfile(m);
               const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx + 1}`;
               const isYou = m.user_id === user?.id;
               return (
@@ -332,19 +342,19 @@ export default function CommunityPage() {
                   className={`flex items-center gap-4 px-5 py-4 transition ${isYou ? "bg-green-50" : "hover:bg-gray-50"}`}>
                   <div className="w-8 text-center text-lg flex-shrink-0">{medal}</div>
                   <div className="w-10 h-10 rounded-xl bg-green-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0 overflow-hidden">
-                    {m.profiles?.avatar_url
-                      ? <img src={m.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
-                      : (m.profiles?.full_name?.[0] ?? "U").toUpperCase()
+                    {profile?.avatar_url
+                      ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                      : (profile?.full_name?.[0] ?? "U").toUpperCase()
                     }
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900">
-                      {m.profiles?.full_name ?? "Eco Swapper"}
+                      {profile?.full_name ?? "Eco Swapper"}
                       {isYou && <span className="ml-2 text-xs text-gray-400">(you)</span>}
                     </p>
                   </div>
                   <div className="text-sm font-bold text-green-600 flex-shrink-0">
-                    🌿 {m.profiles?.eco_points ?? 0} pts
+                    🌿 {profile?.eco_points ?? 0} pts
                   </div>
                 </div>
               );
